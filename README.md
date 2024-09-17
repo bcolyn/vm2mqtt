@@ -12,6 +12,11 @@ detection, physical buttons, ...
 For me, this enables me to offer services (like private a Minecraft server) running in my homelab to my family members
 without having those services eating resources 24/7.
 
+## Binaries
+
+Binaries are available on Docker Hub:
+https://hub.docker.com/repository/docker/bennycolyn/vm2mqtt/general
+
 ## Environment Variables
 
 ### MQTT
