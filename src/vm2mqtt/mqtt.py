@@ -2,7 +2,8 @@ import hashlib
 import json
 import logging
 import re
-from typing import Set, NamedTuple
+import sys
+from typing import Set, NamedTuple, List
 
 import paho.mqtt.client as mqtt
 from bidict import bidict
@@ -19,12 +20,14 @@ class MQTTBridge:
     _client: mqtt.Client
     _vm_status: dict[VirtualMachine, bool]
     _vm_mapping: bidict[VirtualMachine, str]
+    _subscriptions: List[str]
     _managers: Set[VMManager]
     config: BridgeConfig
 
     def __init__(self):
         self._managers = set()
         self._vm_status = dict()
+        self._subscriptions = list()
         self._vm_mapping = bidict()
         self.config = BridgeConfig(ha_discovery_topic_prefix="homeassistant",
                                    bridge_topic_prefix="vm2mqtt")  # TODO Config
@@ -65,6 +68,22 @@ class MQTTBridge:
 
     def on_connect(self, client, userdata, flags, rc):
         logging.info("Connected with result " + str(rc))
+        self._subscribe(f"{self.config.ha_discovery_topic_prefix}/status")
+        for subscription in self._subscriptions:
+            logging.info(f"subscribing to {subscription}")
+            self._client.subscribe(subscription)
+
+    def on_disconnect(self, client, userdata, rc):
+        attempt = 1
+        while attempt < 5:
+            try:
+                logging.info(f"Disconnected, reconnecting attempt {attempt}")
+                self._client.reconnect()
+                return
+            except Exception as ex:
+                attempt += 1
+                logging.error(ex)
+        sys.exit(1)
 
     def on_message(self, client, userdata, msg):
         payload: str = msg.payload.decode()
@@ -111,8 +130,8 @@ class MQTTBridge:
         self._client.username_pw_set(username, password)
         self._client.on_message = self.on_message
         self._client.on_connect = self.on_connect
+        self._client.on_disconnect = self.on_disconnect
         self._client.connect(host, 1883, 60)  # TODO Config
-        self._client.subscribe(f"{self.config.ha_discovery_topic_prefix}/status")
 
     def send_discovery(self, vm: VirtualMachine):
         logging.info(f"Publishing {vm.name} on {self.discovery_topic(vm)}")
@@ -173,5 +192,13 @@ class MQTTBridge:
         self._vm_status[vm] = status
         self._vm_mapping[vm] = vm.unique_id()
         self.send_discovery(vm)
-        self._client.subscribe(self.command_topic(vm))
+        self._subscribe(self.command_topic(vm))
         self.send_status(vm, status)
+
+    def _subscribe(self, topic: str):
+        if self._client.is_connected():
+            logging.info(f"subscribing to {topic}")
+            self._client.subscribe(topic)
+        else:
+            logging.info(f"Not yet connected, will subscribe upon connection to {topic}")
+        self._subscriptions.append(topic)
