@@ -1,8 +1,10 @@
 import hashlib
 import json
 import logging
+import os
 import re
-import sys
+import signal
+import time
 from typing import Set, NamedTuple, List
 
 import paho.mqtt.client as mqtt
@@ -83,13 +85,17 @@ class MQTTBridge:
             except Exception as ex:
                 attempt += 1
                 logging.error(ex)
-        sys.exit(1)
+        logging.fatal("reconnect failed, exiting")
+        os.kill(os.getpid(), signal.SIGINT)
+        time.sleep(5)
+        os._exit(1)
 
     def on_message(self, client, userdata, msg):
         payload: str = msg.payload.decode()
         topic: str = msg.topic
         logging.debug(f"Received message: {topic} {payload}")
         if topic == f"{self.config.ha_discovery_topic_prefix}/status" and payload == "online":
+            logging.info("Home assistant restart detected, republishing discovery info")
             self.republish_all()
             return
         match = re.match(f"{self.config.bridge_topic_prefix}/switch/(.*)/set", topic)
